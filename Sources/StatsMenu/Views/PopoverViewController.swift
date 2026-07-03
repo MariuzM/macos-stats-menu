@@ -42,13 +42,19 @@ final class PopoverViewController: NSViewController {
         let title = NSTextField(labelWithString: "Stats")
         title.font = .boldSystemFont(ofSize: 13)
 
+        let settings = NSButton(image: NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")!,
+                                target: self, action: #selector(openSettings))
+        settings.isBordered = false
+        settings.bezelStyle = .regularSquare
+
         let quit = NSButton(image: NSImage(systemSymbolName: "power", accessibilityDescription: "Quit")!,
                             target: self, action: #selector(quit))
         quit.isBordered = false
         quit.bezelStyle = .regularSquare
 
-        let header = NSStackView(views: [title, NSView(), quit])
+        let header = NSStackView(views: [title, NSView(), settings, quit])
         header.orientation = .horizontal
+        header.spacing = 8
 
         cpuRow.onHover = { [weak self] entered in self?.handleHover(.cpu, anchor: self?.cpuRow, entered: entered) }
         memRow.onHover = { [weak self] entered in self?.handleHover(.memory, anchor: self?.memRow, entered: entered) }
@@ -148,6 +154,12 @@ final class PopoverViewController: NSViewController {
     private func item(pid: Int, name: String, value: String) -> DetailItem {
         let info = AppInfo.lookup(pid: pid)
         return DetailItem(icon: info.icon, name: info.name ?? name, value: value)
+    }
+
+    @objc private func openSettings() {
+        FlyoutController.shared.hide()
+        activeKind = nil
+        SettingsWindowController.shared.show()
     }
 
     @objc private func quit() {
