@@ -6,5 +6,6 @@ xcuserdata/
 .DS_Store
 
 # Build artifacts
+build/
 StatsMenu.app/
 *.zip
