@@ -1,7 +1,7 @@
 import AppKit
 
 private enum MetricKind {
-    case cpu, memory, network
+    case cpu, memory, gpu, network
 }
 
 private struct DetailItem {
@@ -14,6 +14,7 @@ final class PopoverViewController: NSViewController {
     private let engine: StatsEngine
     private let rowCount = 5
     private let networkProcesses = NetworkProcessMonitor()
+    private let gpuProcesses = GPUProcessMonitor()
 
     private let cpuRow = MetricRow(title: "CPU", color: .systemBlue)
     private let memRow = MetricRow(title: "Memory", color: .systemGreen)
@@ -22,6 +23,7 @@ final class PopoverViewController: NSViewController {
 
     private var latestProcesses: [ProcessSample] = []
     private var latestNet: [NetworkProcessSample] = []
+    private var latestGPU: [GPUProcessSample] = []
 
     private var activeKind: MetricKind?
     private weak var anchorView: NSView?
@@ -58,6 +60,7 @@ final class PopoverViewController: NSViewController {
 
         cpuRow.onHover = { [weak self] entered in self?.handleHover(.cpu, anchor: self?.cpuRow, entered: entered) }
         memRow.onHover = { [weak self] entered in self?.handleHover(.memory, anchor: self?.memRow, entered: entered) }
+        gpuRow.onHover = { [weak self] entered in self?.handleHover(.gpu, anchor: self?.gpuRow, entered: entered) }
         networkRow.onHover = { [weak self] entered in self?.handleHover(.network, anchor: self?.networkRow, entered: entered) }
 
         let stack = NSStackView(views: [header, cpuRow, memRow, gpuRow, networkRow])
@@ -126,6 +129,7 @@ final class PopoverViewController: NSViewController {
     private func sample(for kind: MetricKind) {
         switch kind {
         case .cpu, .memory: latestProcesses = ProcessMonitor.sample()
+        case .gpu: latestGPU = gpuProcesses.sample()
         case .network: latestNet = networkProcesses.sample()
         }
     }
@@ -140,6 +144,10 @@ final class PopoverViewController: NSViewController {
             let items = latestProcesses.sorted { $0.memBytes > $1.memBytes }.prefix(rowCount)
                 .map { item(pid: $0.pid, name: $0.name, value: formatMB($0.memBytes)) }
             return [("Top Memory", items)]
+        case .gpu:
+            let items = latestGPU.sorted { $0.percent > $1.percent }.prefix(rowCount)
+                .map { item(pid: $0.pid, name: $0.name, value: String(format: "%.1f%%", $0.percent)) }
+            return [("Top GPU", items)]
         case .network:
             let down = latestNet.filter { $0.downBytesPerSec > 0 }
                 .sorted { $0.downBytesPerSec > $1.downBytesPerSec }.prefix(rowCount)

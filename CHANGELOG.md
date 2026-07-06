@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## [0.3.0] - 2026-07-06
+
+### Added
+- GPU flyout showing top GPU processes.
+
 ## [0.2.0] - 2026-07-03
 
 ### Added
