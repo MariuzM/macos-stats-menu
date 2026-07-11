@@ -8,6 +8,7 @@ final class StatusItemController: NSObject {
     private var globalClickMonitor: Any?
     private var localClickMonitor: Any?
     private var lastSignature: String = ""
+    private var appearanceObserver: NSObjectProtocol?
 
     init(engine: StatsEngine) {
         self.engine = engine
@@ -21,7 +22,18 @@ final class StatusItemController: NSObject {
         }
 
         engine.onUpdate = { [weak self] in self?.refresh() }
+        appearanceObserver = NotificationCenter.default.addObserver(
+            forName: .menuBarAppearanceDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.refresh()
+        }
         refresh()
+    }
+
+    deinit {
+        if let appearanceObserver {
+            NotificationCenter.default.removeObserver(appearanceObserver)
+        }
     }
 
     private func refresh() {

@@ -7,7 +7,6 @@ enum StatusBarRenderer {
     static let cornerRadius: CGFloat = 1.5
     static let netGap: CGFloat = 10
     static let netFont = NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .regular)
-    private static let netWidth = ("000.0 MB/s" as NSString).size(withAttributes: [.font: netFont]).width
 
     struct Metric {
         let value: Double
@@ -16,7 +15,8 @@ enum StatusBarRenderer {
 
     static func signature(for engine: StatsEngine) -> String {
         let bars = [engine.cpu, engine.memory.percent, engine.gpu].map(fillPixels)
-        return "\(bars)|\(rate(engine.network.downBytesPerSec))|\(rate(engine.network.upBytesPerSec))"
+        let contrast = AppearanceSettings.highContrastMenuBar ? 1 : 0
+        return "\(bars)|\(rate(engine.network.downBytesPerSec))|\(rate(engine.network.upBytesPerSec))|\(contrast)"
     }
 
     private static func fillPixels(_ value: Double) -> Int {
@@ -25,36 +25,55 @@ enum StatusBarRenderer {
     }
 
     static func image(for engine: StatsEngine) -> NSImage {
+        let highContrast = AppearanceSettings.highContrastMenuBar
         let metrics = [
             Metric(value: engine.cpu, color: .systemBlue),
             Metric(value: engine.memory.percent, color: .systemGreen),
-            Metric(value: engine.gpu, color: .systemPurple),
+            Metric(value: engine.gpu, color: highContrast ? .systemPink : .systemPurple),
         ]
 
         let thickness = NSStatusBar.system.thickness
         let barsWidth = barWidth * CGFloat(metrics.count) + gap * CGFloat(metrics.count - 1)
+        let horizontalPadding: CGFloat = highContrast ? 4 : 0
 
         let downText = rate(engine.network.downBytesPerSec)
         let upText = rate(engine.network.upBytesPerSec)
-        let downAttrs: [NSAttributedString.Key: Any] = [.font: netFont, .foregroundColor: NSColor.systemTeal]
-        let upAttrs: [NSAttributedString.Key: Any] = [.font: netFont, .foregroundColor: NSColor.systemOrange]
+        let font = highContrast
+            ? NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .semibold)
+            : netFont
+        let netWidth = ("000.0 MB/s" as NSString).size(withAttributes: [.font: font]).width
+        let downAttrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: highContrast ? NSColor.cyan : NSColor.systemTeal,
+        ]
+        let upAttrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.systemOrange,
+        ]
         let downSize = (downText as NSString).size(withAttributes: downAttrs)
         let upSize = (upText as NSString).size(withAttributes: upAttrs)
 
-        let totalWidth = barsWidth + netGap + netWidth
+        let totalWidth = barsWidth + netGap + netWidth + horizontalPadding * 2
         let yInset = (thickness - barHeight) / 2
 
         let image = NSImage(size: NSSize(width: totalWidth, height: thickness))
         image.lockFocus()
 
-        var x: CGFloat = 0
+        if highContrast {
+            NSColor.black.withAlphaComponent(0.78).setFill()
+            NSBezierPath(roundedRect: NSRect(x: 0, y: 1, width: totalWidth, height: thickness - 2),
+                         xRadius: 4, yRadius: 4).fill()
+        }
+
+        var x = horizontalPadding
         for metric in metrics {
             drawBar(value: metric.value, color: metric.color,
+                    highContrast: highContrast,
                     in: NSRect(x: x, y: yInset, width: barWidth, height: barHeight))
             x += barWidth + gap
         }
 
-        let netX = barsWidth + netGap
+        let netX = horizontalPadding + barsWidth + netGap
         let lineHeight = downSize.height
         let blockBottom = (thickness - lineHeight * 2) / 2
         (downText as NSString).draw(at: NSPoint(x: netX + netWidth - downSize.width, y: blockBottom + lineHeight),
@@ -67,9 +86,9 @@ enum StatusBarRenderer {
         return image
     }
 
-    private static func drawBar(value: Double, color: NSColor, in rect: NSRect) {
+    private static func drawBar(value: Double, color: NSColor, highContrast: Bool, in rect: NSRect) {
         let track = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
-        color.withAlphaComponent(0.18).setFill()
+        (highContrast ? NSColor.white.withAlphaComponent(0.28) : color.withAlphaComponent(0.18)).setFill()
         track.fill()
 
         let fraction = max(0, min(1, value / 100))

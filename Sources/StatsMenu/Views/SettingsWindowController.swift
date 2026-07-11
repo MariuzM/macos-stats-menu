@@ -28,6 +28,8 @@ final class SettingsWindowController: NSWindowController {
 
     private let launchToggle = NSButton(checkboxWithTitle: "Launch at login",
                                         target: nil, action: nil)
+    private let highContrastToggle = NSButton(checkboxWithTitle: "High-contrast menu bar colors",
+                                              target: nil, action: nil)
     private let menuBarInterval = NSPopUpButton()
     private let panelInterval = NSPopUpButton()
     private let processInterval = NSPopUpButton()
@@ -35,7 +37,7 @@ final class SettingsWindowController: NSWindowController {
     private let diskInterval = NSPopUpButton()
 
     init() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 430, height: 390),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 430, height: 420),
                               styleMask: [.titled, .closable],
                               backing: .buffered, defer: false)
         window.title = "Settings"
@@ -52,6 +54,9 @@ final class SettingsWindowController: NSWindowController {
 
         launchToggle.target = self
         launchToggle.action = #selector(toggleLaunch)
+        highContrastToggle.target = self
+        highContrastToggle.action = #selector(toggleHighContrast)
+        highContrastToggle.toolTip = "Adds a dark background and stronger colors for light or translucent menu bars."
 
         let hint = NSTextField(labelWithString: "Start StatsMenu automatically when you log in.")
         hint.font = .systemFont(ofSize: 11)
@@ -88,12 +93,12 @@ final class SettingsWindowController: NSWindowController {
         let restore = NSButton(title: "Restore Defaults", target: self, action: #selector(restoreDefaults))
         restore.bezelStyle = .rounded
 
-        let stack = NSStackView(views: [heading, launchToggle, hint, separator,
+        let stack = NSStackView(views: [heading, launchToggle, hint, highContrastToggle, separator,
                                         samplingHeading, samplingHint, grid, restore])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
-        stack.setCustomSpacing(16, after: hint)
+        stack.setCustomSpacing(16, after: highContrastToggle)
         stack.setCustomSpacing(14, after: separator)
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -151,6 +156,7 @@ final class SettingsWindowController: NSWindowController {
 
     func show() {
         launchToggle.state = LaunchAtLogin.isEnabled ? .on : .off
+        highContrastToggle.state = AppearanceSettings.highContrastMenuBar ? .on : .off
         refreshSamplingControls()
         window?.center()
         showWindow(nil)
@@ -161,6 +167,10 @@ final class SettingsWindowController: NSWindowController {
     @objc private func toggleLaunch(_ sender: NSButton) {
         LaunchAtLogin.setEnabled(sender.state == .on)
         sender.state = LaunchAtLogin.isEnabled ? .on : .off
+    }
+
+    @objc private func toggleHighContrast(_ sender: NSButton) {
+        AppearanceSettings.highContrastMenuBar = sender.state == .on
     }
 
     @objc private func samplingChanged() {

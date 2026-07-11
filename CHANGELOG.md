@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## [0.6.0] - 2026-07-12
+
+### Added
+- Optional high-contrast menu bar mode for improved visibility against light and translucent backgrounds.
+
 ## [0.5.0] - 2026-07-11
 
 ### Added
