@@ -1,7 +1,7 @@
 import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let engine = StatsEngine(interval: 5.0)
+    private let engine = StatsEngine()
     private var controller: StatusItemController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {

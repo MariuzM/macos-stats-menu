@@ -1,6 +1,6 @@
 import AppKit
 
-private enum MetricKind {
+private enum MetricKind: Hashable {
     case cpu, memory, gpu, disk, network
 }
 
@@ -35,6 +35,7 @@ final class PopoverViewController: NSViewController {
     private var closeWorkItem: DispatchWorkItem?
     private let sampleQueue = DispatchQueue(label: "StatsMenu.flyout-sampling", qos: .userInitiated)
     private var sampleInFlight = false
+    private var lastSampleTime: [MetricKind: TimeInterval] = [:]
 
     init(engine: StatsEngine) {
         self.engine = engine
@@ -147,27 +148,36 @@ final class PopoverViewController: NSViewController {
 
     private func sampleAsync(_ kind: MetricKind) {
         guard !sampleInFlight else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let sampleKind: MetricKind = kind == .memory ? .cpu : kind
+        guard now - (lastSampleTime[sampleKind] ?? -.infinity) >= SamplingSettings.processInterval else { return }
+        lastSampleTime[sampleKind] = now
         sampleInFlight = true
         sampleQueue.async { [weak self] in
             guard let self else { return }
-            var processes: [ProcessSample]?
-            var gpu: [GPUProcessSample]?
-            var disk: [DiskProcessSample]?
-            var net: [NetworkProcessSample]?
-            switch kind {
-            case .cpu, .memory: processes = ProcessMonitor.sample()
-            case .gpu: gpu = self.gpuProcesses.sample()
-            case .disk: disk = self.diskProcesses.sample()
-            case .network: net = self.networkProcesses.sample()
-            }
-            DispatchQueue.main.async {
-                self.sampleInFlight = false
-                if let processes { self.latestProcesses = processes }
-                if let gpu { self.latestGPU = gpu }
-                if let disk { self.latestDisk = disk }
-                if let net { self.latestNet = net }
-                guard let active = self.activeKind, active == kind else { return }
-                FlyoutController.shared.updateContent(sections: self.detailSections(for: kind))
+            autoreleasepool {
+                var processes: [ProcessSample]?
+                var gpu: [GPUProcessSample]?
+                var disk: [DiskProcessSample]?
+                var net: [NetworkProcessSample]?
+                switch kind {
+                case .cpu, .memory: processes = ProcessMonitor.sample()
+                case .gpu: gpu = self.gpuProcesses.sample()
+                case .disk: disk = self.diskProcesses.sample()
+                case .network: net = self.networkProcesses.sample()
+                }
+                DispatchQueue.main.async {
+                    self.sampleInFlight = false
+                    if let processes { self.latestProcesses = processes }
+                    if let gpu { self.latestGPU = gpu }
+                    if let disk { self.latestDisk = disk }
+                    if let net { self.latestNet = net }
+                    guard let active = self.activeKind else { return }
+                    let sharesProcessSample = (kind == .cpu || kind == .memory)
+                        && (active == .cpu || active == .memory)
+                    guard active == kind || sharesProcessSample else { return }
+                    FlyoutController.shared.updateContent(sections: self.detailSections(for: active))
+                }
             }
         }
     }
@@ -175,34 +185,49 @@ final class PopoverViewController: NSViewController {
     private func detailSections(for kind: MetricKind) -> [(String, [DetailItem])] {
         switch kind {
         case .cpu:
-            let items = latestProcesses.sorted { $0.cpu > $1.cpu }.prefix(rowCount)
+            let items = top(latestProcesses) { $0.cpu }
                 .map { item(pid: $0.pid, name: $0.name, value: String(format: "%.1f%%", $0.cpu)) }
             return [("Top CPU", items)]
         case .memory:
-            let items = latestProcesses.sorted { $0.memBytes > $1.memBytes }.prefix(rowCount)
+            let items = top(latestProcesses) { Double($0.memBytes) }
                 .map { item(pid: $0.pid, name: $0.name, value: formatMB($0.memBytes)) }
             return [("Top Memory", items)]
         case .gpu:
-            let items = latestGPU.sorted { $0.percent > $1.percent }.prefix(rowCount)
+            let items = top(latestGPU) { $0.percent }
                 .map { item(pid: $0.pid, name: $0.name, value: String(format: "%.1f%%", $0.percent)) }
             return [("Top GPU", items)]
         case .disk:
-            let read = latestDisk.filter { $0.readBytesPerSec > 0 }
-                .sorted { $0.readBytesPerSec > $1.readBytesPerSec }.prefix(rowCount)
+            let read = top(latestDisk) { $0.readBytesPerSec }
                 .map { item(pid: $0.pid, name: $0.name, value: rate($0.readBytesPerSec)) }
-            let write = latestDisk.filter { $0.writeBytesPerSec > 0 }
-                .sorted { $0.writeBytesPerSec > $1.writeBytesPerSec }.prefix(rowCount)
+            let write = top(latestDisk) { $0.writeBytesPerSec }
                 .map { item(pid: $0.pid, name: $0.name, value: rate($0.writeBytesPerSec)) }
             return [("Top Read", read), ("Top Write", write)]
         case .network:
-            let down = latestNet.filter { $0.downBytesPerSec > 0 }
-                .sorted { $0.downBytesPerSec > $1.downBytesPerSec }.prefix(rowCount)
+            let down = top(latestNet) { $0.downBytesPerSec }
                 .map { item(pid: $0.pid, name: $0.name, value: rate($0.downBytesPerSec)) }
-            let up = latestNet.filter { $0.upBytesPerSec > 0 }
-                .sorted { $0.upBytesPerSec > $1.upBytesPerSec }.prefix(rowCount)
+            let up = top(latestNet) { $0.upBytesPerSec }
                 .map { item(pid: $0.pid, name: $0.name, value: rate($0.upBytesPerSec)) }
             return [("Top Download", down), ("Top Upload", up)]
         }
+    }
+
+    // The flyout only displays five rows. Maintaining those five while walking
+    // the samples avoids sorting (and copying) the full system process list.
+    private func top<Element>(_ values: [Element], score: (Element) -> Double) -> [Element] {
+        var ranked: [(score: Double, value: Element)] = []
+        ranked.reserveCapacity(rowCount)
+
+        for value in values {
+            let valueScore = score(value)
+            guard valueScore > 0 else { continue }
+            let insertion = ranked.firstIndex { valueScore > $0.score } ?? ranked.endIndex
+            guard insertion < rowCount else { continue }
+            ranked.insert((valueScore, value), at: insertion)
+            if ranked.count > rowCount {
+                ranked.removeLast()
+            }
+        }
+        return ranked.map(\.value)
     }
 
     private func item(pid: Int, name: String, value: String) -> DetailItem {

@@ -57,7 +57,7 @@ final class StatusItemController: NSObject {
         panelVC = vc
         self.panel = panel
 
-        engine.setInterval(2.0)
+        engine.setDetailed(true)
         vc.refresh()
 
         let size = vc.view.fittingSize
@@ -98,7 +98,7 @@ final class StatusItemController: NSObject {
         panel?.contentViewController = nil
         panel = nil
         panelVC = nil
-        engine.setInterval(5.0)
+        engine.setDetailed(false)
         AppInfo.clearCache()
         malloc_zone_pressure_relief(nil, 0)
     }

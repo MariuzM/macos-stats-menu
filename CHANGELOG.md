@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## [0.5.0] - 2026-07-11
+
+### Added
+- Persistent refresh timing controls for menu bar, panel, process flyouts, GPU, and disk sampling.
+- Restore-defaults action for sampling settings.
+
+### Changed
+- Adaptive GPU and disk polling reduces work while the stats panel is closed.
+- Process flyout sampling is throttled and top-process selection avoids sorting the full process list.
+- Temporary sampling allocations are released sooner to reduce memory pressure.
+
 ## [0.4.0] - 2026-07-11
 
 - Disk row with read/write graph and top-apps flyout, solid dark UI, ~9× lower idle CPU.

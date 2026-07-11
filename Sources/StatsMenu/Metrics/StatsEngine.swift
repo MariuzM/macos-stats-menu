@@ -27,9 +27,27 @@ final class StatsEngine {
 
     private var interval: TimeInterval
     private var timer: Timer?
+    private var isDetailed = false
+    private var lastGPUSampleTime: TimeInterval = -.infinity
+    private var lastDiskSampleTime: TimeInterval = -.infinity
+    private var settingsObserver: NSObjectProtocol?
 
-    init(interval: TimeInterval = 1.0) {
+    // IOKit property dictionaries are considerably more expensive than the Mach
+    // and interface counters. Keep them fresh while the panel is visible, but do
+    // not continuously query data that cannot be seen while it is closed.
+    init(interval: TimeInterval = SamplingSettings.menuBarInterval) {
         self.interval = interval
+        settingsObserver = NotificationCenter.default.addObserver(
+            forName: .samplingSettingsDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.applySamplingSettings()
+        }
+    }
+
+    deinit {
+        if let settingsObserver {
+            NotificationCenter.default.removeObserver(settingsObserver)
+        }
     }
 
     func start() {
@@ -43,6 +61,23 @@ final class StatsEngine {
         if timer != nil {
             scheduleTimer()
         }
+    }
+
+    func setDetailed(_ detailed: Bool) {
+        guard detailed != isDetailed else { return }
+        isDetailed = detailed
+        setInterval(detailed ? SamplingSettings.panelInterval : SamplingSettings.menuBarInterval)
+
+        // Refresh slow metrics on the next panel sample instead of leaving a
+        // value that may be up to 30 seconds old.
+        if detailed {
+            lastGPUSampleTime = -.infinity
+            lastDiskSampleTime = -.infinity
+        }
+    }
+
+    private func applySamplingSettings() {
+        setInterval(isDetailed ? SamplingSettings.panelInterval : SamplingSettings.menuBarInterval)
     }
 
     private func scheduleTimer() {
@@ -61,11 +96,21 @@ final class StatsEngine {
     }
 
     func sampleOnce() {
-        cpu = cpuMonitor.sample()
-        memory = memoryMonitor.sample()
-        gpu = gpuMonitor.sample()
-        network = networkMonitor.sample()
-        disk = diskMonitor.sample()
+        autoreleasepool {
+            let now = ProcessInfo.processInfo.systemUptime
+            cpu = cpuMonitor.sample()
+            memory = memoryMonitor.sample()
+            network = networkMonitor.sample()
+
+            if isDetailed || now - lastGPUSampleTime >= SamplingSettings.backgroundGPUInterval {
+                gpu = gpuMonitor.sample()
+                lastGPUSampleTime = now
+            }
+            if isDetailed || now - lastDiskSampleTime >= SamplingSettings.backgroundDiskInterval {
+                disk = diskMonitor.sample()
+                lastDiskSampleTime = now
+            }
+        }
 
         append(&cpuHistory, cpu)
         append(&memHistory, memory.percent)
