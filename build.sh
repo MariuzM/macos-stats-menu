@@ -29,3 +29,4 @@ ditto -c -k --keepParent "${APP_BUNDLE}" "${ZIP_FILE}"
 
 echo "Done → ${APP_BUNDLE}"
 echo "Run with: open ${APP_BUNDLE}   (or: ./${APP_BUNDLE}/Contents/MacOS/${APP_NAME})"
+open "${OUTPUT_DIR}"
