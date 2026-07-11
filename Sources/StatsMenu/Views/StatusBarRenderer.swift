@@ -7,6 +7,7 @@ enum StatusBarRenderer {
     static let cornerRadius: CGFloat = 1.5
     static let netGap: CGFloat = 10
     static let netFont = NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .regular)
+    private static let netWidth = ("000.0 MB/s" as NSString).size(withAttributes: [.font: netFont]).width
 
     struct Metric {
         let value: Double
@@ -39,7 +40,6 @@ enum StatusBarRenderer {
         let upAttrs: [NSAttributedString.Key: Any] = [.font: netFont, .foregroundColor: NSColor.systemOrange]
         let downSize = (downText as NSString).size(withAttributes: downAttrs)
         let upSize = (upText as NSString).size(withAttributes: upAttrs)
-        let netWidth = ("000.0 MB/s" as NSString).size(withAttributes: downAttrs).width
 
         let totalWidth = barsWidth + netGap + netWidth
         let yInset = (thickness - barHeight) / 2
@@ -82,6 +82,7 @@ enum StatusBarRenderer {
     }
 
     private static func rate(_ bps: Double) -> String {
+        guard bps >= 1024 else { return "0 KB/s" }
         let units = ["KB/s", "MB/s", "GB/s"]
         var value = bps / 1024
         var unit = 0

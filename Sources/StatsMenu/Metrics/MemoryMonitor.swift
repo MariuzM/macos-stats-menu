@@ -12,6 +12,7 @@ struct MemorySample {
 }
 
 final class MemoryMonitor {
+    private let host = mach_host_self()
     private let total = ProcessInfo.processInfo.physicalMemory
     private let pageSize: UInt64 = {
         var size: vm_size_t = 0
@@ -26,7 +27,7 @@ final class MemoryMonitor {
         )
         let result = withUnsafeMutablePointer(to: &stats) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+                host_statistics64(host, HOST_VM_INFO64, $0, &count)
             }
         }
         guard result == KERN_SUCCESS else {

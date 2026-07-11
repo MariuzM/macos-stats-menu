@@ -1,7 +1,7 @@
 import AppKit
 
 private enum MetricKind {
-    case cpu, memory, gpu, network
+    case cpu, memory, gpu, disk, network
 }
 
 private struct DetailItem {
@@ -10,24 +10,31 @@ private struct DetailItem {
     let value: String
 }
 
+private let solidBackgroundColor = NSColor(srgbRed: 0.12, green: 0.12, blue: 0.13, alpha: 1)
+
 final class PopoverViewController: NSViewController {
     private let engine: StatsEngine
     private let rowCount = 5
     private let networkProcesses = NetworkProcessMonitor()
     private let gpuProcesses = GPUProcessMonitor()
+    private let diskProcesses = DiskProcessMonitor()
 
     private let cpuRow = MetricRow(title: "CPU", color: .systemBlue)
     private let memRow = MetricRow(title: "Memory", color: .systemGreen)
     private let gpuRow = MetricRow(title: "GPU", color: .systemPurple)
+    private let diskRow = DiskRow()
     private let networkRow = NetworkRow()
 
     private var latestProcesses: [ProcessSample] = []
     private var latestNet: [NetworkProcessSample] = []
     private var latestGPU: [GPUProcessSample] = []
+    private var latestDisk: [DiskProcessSample] = []
 
     private var activeKind: MetricKind?
     private weak var anchorView: NSView?
     private var closeWorkItem: DispatchWorkItem?
+    private let sampleQueue = DispatchQueue(label: "StatsMenu.flyout-sampling", qos: .userInitiated)
+    private var sampleInFlight = false
 
     init(engine: StatsEngine) {
         self.engine = engine
@@ -61,9 +68,10 @@ final class PopoverViewController: NSViewController {
         cpuRow.onHover = { [weak self] entered in self?.handleHover(.cpu, anchor: self?.cpuRow, entered: entered) }
         memRow.onHover = { [weak self] entered in self?.handleHover(.memory, anchor: self?.memRow, entered: entered) }
         gpuRow.onHover = { [weak self] entered in self?.handleHover(.gpu, anchor: self?.gpuRow, entered: entered) }
+        diskRow.onHover = { [weak self] entered in self?.handleHover(.disk, anchor: self?.diskRow, entered: entered) }
         networkRow.onHover = { [weak self] entered in self?.handleHover(.network, anchor: self?.networkRow, entered: entered) }
 
-        let stack = NSStackView(views: [header, cpuRow, memRow, gpuRow, networkRow])
+        let stack = NSStackView(views: [header, cpuRow, memRow, gpuRow, diskRow, networkRow])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -71,6 +79,10 @@ final class PopoverViewController: NSViewController {
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         let container = NSView()
+        container.wantsLayer = true
+        container.layer?.backgroundColor = solidBackgroundColor.cgColor
+        container.layer?.cornerRadius = 10
+        container.layer?.masksToBounds = true
         container.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: container.topAnchor),
@@ -82,19 +94,26 @@ final class PopoverViewController: NSViewController {
         view = container
     }
 
+    func ownsWindow(_ window: NSWindow?) -> Bool {
+        window != nil && window === FlyoutController.shared.window
+    }
+
     func refresh() {
         cpuRow.update(value: "\(Int(engine.cpu.rounded()))%", subtitle: nil, history: engine.cpuHistory)
         memRow.update(value: "\(Int(engine.memory.percent.rounded()))%",
                       subtitle: "\(formatGB(engine.memory.usedBytes)) of \(formatGB(engine.memory.totalBytes))",
                       history: engine.memHistory)
         gpuRow.update(value: "\(Int(engine.gpu.rounded()))%", subtitle: nil, history: engine.gpuHistory)
+        diskRow.update(read: rate(engine.disk.readBytesPerSec),
+                       write: rate(engine.disk.writeBytesPerSec),
+                       subtitle: "\(formatGB(engine.disk.usedBytes)) of \(formatGB(engine.disk.totalBytes)) used",
+                       readHistory: engine.diskReadHistory, writeHistory: engine.diskWriteHistory)
         networkRow.update(down: rate(engine.network.downBytesPerSec),
                           up: rate(engine.network.upBytesPerSec),
                           downHistory: engine.downHistory, upHistory: engine.upHistory)
 
         if let kind = activeKind {
-            sample(for: kind)
-            FlyoutController.shared.updateContent(sections: detailSections(for: kind))
+            sampleAsync(kind)
         }
     }
 
@@ -104,8 +123,8 @@ final class PopoverViewController: NSViewController {
             closeWorkItem?.cancel()
             activeKind = kind
             anchorView = anchor
-            sample(for: kind)
             presentDetail()
+            sampleAsync(kind)
         } else {
             scheduleClose()
         }
@@ -126,11 +145,30 @@ final class PopoverViewController: NSViewController {
         FlyoutController.shared.show(sections: detailSections(for: kind), relativeTo: anchor)
     }
 
-    private func sample(for kind: MetricKind) {
-        switch kind {
-        case .cpu, .memory: latestProcesses = ProcessMonitor.sample()
-        case .gpu: latestGPU = gpuProcesses.sample()
-        case .network: latestNet = networkProcesses.sample()
+    private func sampleAsync(_ kind: MetricKind) {
+        guard !sampleInFlight else { return }
+        sampleInFlight = true
+        sampleQueue.async { [weak self] in
+            guard let self else { return }
+            var processes: [ProcessSample]?
+            var gpu: [GPUProcessSample]?
+            var disk: [DiskProcessSample]?
+            var net: [NetworkProcessSample]?
+            switch kind {
+            case .cpu, .memory: processes = ProcessMonitor.sample()
+            case .gpu: gpu = self.gpuProcesses.sample()
+            case .disk: disk = self.diskProcesses.sample()
+            case .network: net = self.networkProcesses.sample()
+            }
+            DispatchQueue.main.async {
+                self.sampleInFlight = false
+                if let processes { self.latestProcesses = processes }
+                if let gpu { self.latestGPU = gpu }
+                if let disk { self.latestDisk = disk }
+                if let net { self.latestNet = net }
+                guard let active = self.activeKind, active == kind else { return }
+                FlyoutController.shared.updateContent(sections: self.detailSections(for: kind))
+            }
         }
     }
 
@@ -148,6 +186,14 @@ final class PopoverViewController: NSViewController {
             let items = latestGPU.sorted { $0.percent > $1.percent }.prefix(rowCount)
                 .map { item(pid: $0.pid, name: $0.name, value: String(format: "%.1f%%", $0.percent)) }
             return [("Top GPU", items)]
+        case .disk:
+            let read = latestDisk.filter { $0.readBytesPerSec > 0 }
+                .sorted { $0.readBytesPerSec > $1.readBytesPerSec }.prefix(rowCount)
+                .map { item(pid: $0.pid, name: $0.name, value: rate($0.readBytesPerSec)) }
+            let write = latestDisk.filter { $0.writeBytesPerSec > 0 }
+                .sorted { $0.writeBytesPerSec > $1.writeBytesPerSec }.prefix(rowCount)
+                .map { item(pid: $0.pid, name: $0.name, value: rate($0.writeBytesPerSec)) }
+            return [("Top Read", read), ("Top Write", write)]
         case .network:
             let down = latestNet.filter { $0.downBytesPerSec > 0 }
                 .sorted { $0.downBytesPerSec > $1.downBytesPerSec }.prefix(rowCount)
@@ -204,6 +250,8 @@ private final class FlyoutController {
     private let detailVC = DetailListViewController(rowCount: 5)
     private let panel: NSPanel
 
+    var window: NSWindow? { panel }
+
     private init() {
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 280, height: 120),
                         styleMask: [.borderless, .nonactivatingPanel],
@@ -214,6 +262,7 @@ private final class FlyoutController {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hidesOnDeactivate = false
+        panel.appearance = NSAppearance(named: .darkAqua)
         panel.contentViewController = detailVC
     }
 
@@ -239,6 +288,12 @@ private final class FlyoutController {
     func updateContent(sections: [(String, [DetailItem])]) {
         guard panel.isVisible else { return }
         detailVC.update(sections: sections)
+        let size = detailVC.view.fittingSize
+        if panel.frame.size != size {
+            let frame = panel.frame
+            panel.setFrame(NSRect(x: frame.minX, y: frame.maxY - size.height,
+                                  width: size.width, height: size.height), display: true)
+        }
     }
 
     func hide() {
@@ -288,11 +343,9 @@ private final class DetailListViewController: NSViewController {
         stack.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let container = NSVisualEffectView()
-        container.material = .menu
-        container.state = .active
-        container.blendingMode = .behindWindow
+        let container = NSView()
         container.wantsLayer = true
+        container.layer?.backgroundColor = solidBackgroundColor.cgColor
         container.layer?.cornerRadius = 10
         container.layer?.masksToBounds = true
         container.addSubview(stack)
@@ -397,6 +450,60 @@ private final class MetricRow: HoverStackView {
         subtitleLabel.stringValue = subtitle ?? ""
         subtitleLabel.isHidden = subtitle == nil
         graph.history = history
+    }
+}
+
+private final class DiskRow: HoverStackView {
+    private let readLabel = NSTextField(labelWithString: "R 0 B/s")
+    private let writeLabel = NSTextField(labelWithString: "W 0 B/s")
+    private let subtitleLabel = NSTextField(labelWithString: "")
+    private let graph = NetworkGraphView()
+
+    init() {
+        super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .leading
+        spacing = 3
+
+        let titleLabel = NSTextField(labelWithString: "Disk")
+        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+
+        readLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        readLabel.textColor = .systemIndigo
+        writeLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        writeLabel.textColor = .systemPink
+
+        let head = NSStackView(views: [titleLabel, NSView(), readLabel, writeLabel])
+        head.orientation = .horizontal
+        head.spacing = 8
+        head.translatesAutoresizingMaskIntoConstraints = false
+
+        subtitleLabel.font = .systemFont(ofSize: 10)
+        subtitleLabel.textColor = .secondaryLabelColor
+
+        graph.downColor = .systemIndigo
+        graph.upColor = .systemPink
+        graph.translatesAutoresizingMaskIntoConstraints = false
+
+        addArrangedSubview(head)
+        addArrangedSubview(subtitleLabel)
+        addArrangedSubview(graph)
+
+        NSLayoutConstraint.activate([
+            head.widthAnchor.constraint(equalToConstant: 232),
+            graph.widthAnchor.constraint(equalToConstant: 232),
+            graph.heightAnchor.constraint(equalToConstant: 44),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func update(read: String, write: String, subtitle: String, readHistory: [Double], writeHistory: [Double]) {
+        readLabel.stringValue = "R \(read)"
+        writeLabel.stringValue = "W \(write)"
+        subtitleLabel.stringValue = subtitle
+        graph.down = readHistory
+        graph.up = writeHistory
     }
 }
 

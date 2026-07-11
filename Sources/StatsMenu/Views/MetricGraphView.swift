@@ -11,7 +11,7 @@ final class MetricGraphView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let b = bounds
-        NSColor.quaternaryLabelColor.withAlphaComponent(0.4).setFill()
+        NSColor.white.withAlphaComponent(0.06).setFill()
         NSBezierPath(roundedRect: b, xRadius: 4, yRadius: 4).fill()
 
         guard history.count > 1 else { return }

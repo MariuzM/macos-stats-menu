@@ -11,7 +11,7 @@ final class NetworkGraphView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let b = bounds
-        NSColor.quaternaryLabelColor.withAlphaComponent(0.4).setFill()
+        NSColor.white.withAlphaComponent(0.06).setFill()
         NSBezierPath(roundedRect: b, xRadius: 4, yRadius: 4).fill()
 
         let maxVal = max(down.max() ?? 0, up.max() ?? 0, 1)

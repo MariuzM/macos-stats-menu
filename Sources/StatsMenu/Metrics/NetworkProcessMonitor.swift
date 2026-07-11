@@ -31,8 +31,8 @@ final class NetworkProcessMonitor {
         var result: [NetworkProcessSample] = []
         for (key, counters) in current {
             guard let prev = previous[key] else { continue }
-            let down = Double(counters.bytesIn &- prev.bytesIn) / dt
-            let up = Double(counters.bytesOut &- prev.bytesOut) / dt
+            let down = counters.bytesIn >= prev.bytesIn ? Double(counters.bytesIn - prev.bytesIn) / dt : 0
+            let up = counters.bytesOut >= prev.bytesOut ? Double(counters.bytesOut - prev.bytesOut) / dt : 0
             guard down > 0 || up > 0 else { continue }
 
             guard let dot = key.lastIndex(of: "."),
@@ -40,8 +40,8 @@ final class NetworkProcessMonitor {
             let name = String(key[..<dot])
             result.append(NetworkProcessSample(
                 name: name, pid: pid,
-                downBytesPerSec: max(0, down),
-                upBytesPerSec: max(0, up)
+                downBytesPerSec: down,
+                upBytesPerSec: up
             ))
         }
         return result

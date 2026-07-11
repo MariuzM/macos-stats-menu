@@ -1,6 +1,7 @@
 import Foundation
 
 final class CPUMonitor {
+    private let host = mach_host_self()
     private var previous: host_cpu_load_info_data_t?
 
     func sample() -> Double {
@@ -10,7 +11,7 @@ final class CPUMonitor {
         )
         let result = withUnsafeMutablePointer(to: &info) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, $0, &count)
+                host_statistics(host, HOST_CPU_LOAD_INFO, $0, &count)
             }
         }
         guard result == KERN_SUCCESS else { return 0 }

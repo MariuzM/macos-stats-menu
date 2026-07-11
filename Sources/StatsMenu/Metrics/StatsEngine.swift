@@ -7,12 +7,15 @@ final class StatsEngine {
     private(set) var memory: MemorySample = .zero
     private(set) var gpu: Double = 0
     private(set) var network: NetworkSample = .zero
+    private(set) var disk: DiskSample = .zero
 
     private(set) var cpuHistory: [Double] = []
     private(set) var memHistory: [Double] = []
     private(set) var gpuHistory: [Double] = []
     private(set) var downHistory: [Double] = []
     private(set) var upHistory: [Double] = []
+    private(set) var diskReadHistory: [Double] = []
+    private(set) var diskWriteHistory: [Double] = []
 
     var onUpdate: (() -> Void)?
 
@@ -20,8 +23,9 @@ final class StatsEngine {
     private let memoryMonitor = MemoryMonitor()
     private let gpuMonitor = GPUMonitor()
     private let networkMonitor = NetworkMonitor()
+    private let diskMonitor = DiskMonitor()
 
-    private let interval: TimeInterval
+    private var interval: TimeInterval
     private var timer: Timer?
 
     init(interval: TimeInterval = 1.0) {
@@ -30,6 +34,19 @@ final class StatsEngine {
 
     func start() {
         sampleOnce()
+        scheduleTimer()
+    }
+
+    func setInterval(_ value: TimeInterval) {
+        guard value != interval else { return }
+        interval = value
+        if timer != nil {
+            scheduleTimer()
+        }
+    }
+
+    private func scheduleTimer() {
+        timer?.invalidate()
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             self?.sampleOnce()
         }
@@ -48,12 +65,15 @@ final class StatsEngine {
         memory = memoryMonitor.sample()
         gpu = gpuMonitor.sample()
         network = networkMonitor.sample()
+        disk = diskMonitor.sample()
 
         append(&cpuHistory, cpu)
         append(&memHistory, memory.percent)
         append(&gpuHistory, gpu)
         append(&downHistory, network.downBytesPerSec)
         append(&upHistory, network.upBytesPerSec)
+        append(&diskReadHistory, disk.readBytesPerSec)
+        append(&diskWriteHistory, disk.writeBytesPerSec)
 
         onUpdate?()
     }

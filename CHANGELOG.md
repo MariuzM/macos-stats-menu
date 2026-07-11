@@ -2,6 +2,10 @@
 
 All notable changes to this project are documented here.
 
+## [0.4.0] - 2026-07-11
+
+- Disk row with read/write graph and top-apps flyout, solid dark UI, ~9× lower idle CPU.
+
 ## [0.3.0] - 2026-07-06
 
 ### Added

@@ -1,11 +1,12 @@
 import AppKit
 
-final class StatusItemController: NSObject, NSPopoverDelegate {
+final class StatusItemController: NSObject {
     private let statusItem: NSStatusItem
     private let engine: StatsEngine
-    private var popover: NSPopover?
-    private var popoverVC: PopoverViewController?
-    private var outsideClickMonitor: Any?
+    private var panel: NSPanel?
+    private var panelVC: PopoverViewController?
+    private var globalClickMonitor: Any?
+    private var localClickMonitor: Any?
     private var lastSignature: String = ""
 
     init(engine: StatsEngine) {
@@ -16,7 +17,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         if let button = statusItem.button {
             button.imagePosition = .imageOnly
             button.target = self
-            button.action = #selector(togglePopover)
+            button.action = #selector(togglePanel)
         }
 
         engine.onUpdate = { [weak self] in self?.refresh() }
@@ -29,43 +30,75 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             lastSignature = signature
             statusItem.button?.image = StatusBarRenderer.image(for: engine)
         }
-        if popover?.isShown == true {
-            popoverVC?.refresh()
+        if panel?.isVisible == true {
+            panelVC?.refresh()
         }
     }
 
-    @objc private func togglePopover() {
-        guard let button = statusItem.button else { return }
-
-        if let popover, popover.isShown {
-            popover.performClose(nil)
+    @objc private func togglePanel() {
+        if panel != nil {
+            closePanel()
             return
         }
+        guard let button = statusItem.button, let buttonWindow = button.window else { return }
 
         let vc = PopoverViewController(engine: engine)
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.delegate = self
-        popover.contentViewController = vc
-        popoverVC = vc
-        self.popover = popover
+        let panel = NSPanel(contentRect: .zero,
+                            styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+        panel.isFloatingPanel = true
+        panel.level = .popUpMenu
+        panel.hasShadow = true
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hidesOnDeactivate = false
+        panel.appearance = NSAppearance(named: .darkAqua)
+        panel.contentViewController = vc
+        panelVC = vc
+        self.panel = panel
 
+        engine.setInterval(2.0)
         vc.refresh()
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
 
-        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            self?.popover?.performClose(nil)
+        let size = vc.view.fittingSize
+        panel.setContentSize(size)
+
+        let buttonRect = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+        var x = buttonRect.midX - size.width / 2
+        if let screen = buttonWindow.screen {
+            x = min(max(x, screen.visibleFrame.minX + 8), screen.visibleFrame.maxX - size.width - 8)
+        }
+        panel.setFrameOrigin(NSPoint(x: x, y: buttonRect.minY - size.height - 6))
+        panel.orderFront(nil)
+
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            self?.closePanel()
+        }
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] e in
+            guard let self, let panel = self.panel else { return e }
+            if e.window !== panel,
+               e.window !== self.statusItem.button?.window,
+               self.panelVC?.ownsWindow(e.window) != true {
+                self.closePanel()
+            }
+            return e
         }
     }
 
-    func popoverDidClose(_ notification: Notification) {
-        if let monitor = outsideClickMonitor {
+    private func closePanel() {
+        if let monitor = globalClickMonitor {
             NSEvent.removeMonitor(monitor)
-            outsideClickMonitor = nil
+            globalClickMonitor = nil
         }
-        popover?.contentViewController = nil
-        popover = nil
-        popoverVC = nil
+        if let monitor = localClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            localClickMonitor = nil
+        }
+        panel?.orderOut(nil)
+        panel?.contentViewController = nil
+        panel = nil
+        panelVC = nil
+        engine.setInterval(5.0)
         AppInfo.clearCache()
         malloc_zone_pressure_relief(nil, 0)
     }

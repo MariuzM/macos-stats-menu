@@ -25,9 +25,9 @@ final class NetworkMonitor {
         let dt = now - prevTime
         guard dt > 0 else { return .zero }
 
-        let down = Double(totalIn &- prevIn) / dt
-        let up = Double(totalOut &- prevOut) / dt
-        return NetworkSample(downBytesPerSec: max(0, down), upBytesPerSec: max(0, up))
+        let down = totalIn >= prevIn ? Double(totalIn - prevIn) / dt : 0
+        let up = totalOut >= prevOut ? Double(totalOut - prevOut) / dt : 0
+        return NetworkSample(downBytesPerSec: down, upBytesPerSec: up)
     }
 
     private func counters() -> (UInt64, UInt64) {

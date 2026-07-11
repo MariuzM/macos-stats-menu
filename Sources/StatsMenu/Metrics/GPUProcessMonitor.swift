@@ -25,8 +25,8 @@ final class GPUProcessMonitor {
 
         var result: [GPUProcessSample] = []
         for (pid, accumulated) in current.times {
-            guard let prev = previous[pid] else { continue }
-            let deltaNanos = accumulated &- prev
+            guard let prev = previous[pid], accumulated >= prev else { continue }
+            let deltaNanos = accumulated - prev
             let percent = Double(deltaNanos) / (dt * 1_000_000_000) * 100
             guard percent > 0 else { continue }
             result.append(GPUProcessSample(
